@@ -10,12 +10,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Set up GCP credentials
+        run: echo "GCP_CRED_JSON=${{secrets.GCP_CRED_JSON}}" >> $GITHUB_ENV
       - name: Checkout code
         uses: actions/checkout@v3
       - id: 'auth'
         uses: google-github-actions/auth@v1
         with:
-          credentials_json: '${{ secrets.GCP_CRED_JSON }}'
+          credentials_json: ${{ env.GCP_CRED_JSON }}
       - name: Configure Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
       - name: Configure Docker Client
