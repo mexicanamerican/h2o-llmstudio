@@ -1,4 +1,4 @@
-PYTHON_VERSION ?= 3.10
+PYTHON_VERSION ?= 3.10.11
 PYTHON ?= python$(PYTHON_VERSION)
 PIP ?= $(PYTHON) -m pip
 PIPENV ?= $(PYTHON) -m pipenv
@@ -13,7 +13,7 @@ pipenv:
 
 .PHONY: setup
 setup: pipenv
-	$(PIPENV) install --verbose --python $(PYTHON_VERSION)
+	$(PIPENV) install --verbose --python $(PYTHON_VERSION) --pre
 
 .PHONY: setup-dev
 setup-dev: pipenv
@@ -62,7 +62,7 @@ black: pipenv
 	$(PIPENV) run black .
 
 .PHONY: test
-test: reports
+test: reports export-requirements
 	export PYTHONPATH=$(PWD) && $(PIPENV) run pytest -v -s -x \
 		--junitxml=./reports/junit.xml \
 		tests/* | tee reports/pytest.log
@@ -87,6 +87,7 @@ docker-build-nightly:
 
 .PHONY: docker-run-nightly
 docker-run-nightly:
+	mkdir -p output
 ifeq (,$(wildcard ./data))
 	mkdir data
 endif
