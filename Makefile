@@ -1,5 +1,5 @@
 PYTHON_VERSION ?= 3.10.11
-PYTHON ?= python$(PYTHON_VERSION)
+PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 PIPENV ?= $(PYTHON) -m pipenv
 PIPENV_PYTHON = $(PIPENV) run python
