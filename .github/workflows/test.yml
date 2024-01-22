@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS_SECRET }}
         with:
           python-version: 3.10.11
       - run: make setup-dev
