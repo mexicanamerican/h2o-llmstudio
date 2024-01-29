@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+
+      - name: Authenticate
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: <workload_identity_provider>
+          # or
+          credentials_json: ${{ secrets.CREDENTIALS_JSON }}
+
+      # Add more steps for the build process
