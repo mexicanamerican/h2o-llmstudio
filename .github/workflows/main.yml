@@ -1,0 +1,39 @@
+name: GitHub Actions Workflow
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest
+
+      - name: Deploy to production
+        env:
+          WORKLOAD_IDENTITY_PROVIDER: <workload_identity_provider_value>
+          CREDENTIALS_JSON: <credentials_json_value>
+        run: |
+          echo $WORKLOAD_IDENTITY_PROVIDER > workload_identity_provider.txt
+          echo $CREDENTIALS_JSON > credentials.json
+          # Additional deployment steps
+
+      - name: Cleanup
+        run: |
+          rm workload_identity_provider.txt
+          rm credentials.json
