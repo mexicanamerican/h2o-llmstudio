@@ -23,7 +23,6 @@ import deepspeed
 import numpy as np
 import pandas as pd
 import torch
-from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers.integrations import HfDeepSpeedConfig
@@ -193,10 +192,11 @@ def run_train(
     ):
         activate_neftune(model, cfg.augmentation.neftune_noise_alpha)
 
-    scaler: GradScaler | None = None
+    scaler: torch.amp.GradScaler | None = None
     if cfg.environment.mixed_precision:
-        scaler = GradScaler(
-            enabled=(cfg.environment.mixed_precision_dtype == "float16")
+        scaler = torch.amp.GradScaler(
+            "cuda",
+            enabled=(cfg.environment.mixed_precision_dtype == "float16"),
         )
 
     optimizer.zero_grad(set_to_none=True)
@@ -281,7 +281,8 @@ def run_train(
             # When using DeepSpeed, mixed precision is handled by the engine via
             # its bf16/fp16 config, so a nested torch.autocast must not be active
             # (newer DeepSpeed asserts against it).
-            with autocast(
+            with torch.amp.autocast(
+                "cuda",
                 enabled=cfg.environment.mixed_precision
                 and not cfg.environment.use_deepspeed,
                 dtype=get_torch_dtype(cfg.environment.mixed_precision_dtype),
@@ -356,13 +357,23 @@ def run_train(
                     / cfg.environment._step_log_denominator,
                 )
                 if cfg.training.differential_learning_rate_layers:
-                    cfg.logging._logger.log(
-                        "meta",
-                        "lr_diff",
-                        optimizer.param_groups[2]["lr"],
-                        step=cfg.environment._curr_step
-                        / cfg.environment._step_log_denominator,
-                    )
+                    # The differential param group is identified by a stable
+                    # marker rather than a fixed index: empty groups are dropped
+                    # in get_optimizer (torch>=2.11 alignment), so its position is
+                    # not guaranteed and it may be absent entirely.
+                    differential_lrs = [
+                        group["lr"]
+                        for group in optimizer.param_groups
+                        if group.get("differential")
+                    ]
+                    if differential_lrs:
+                        cfg.logging._logger.log(
+                            "meta",
+                            "lr_diff",
+                            differential_lrs[0],
+                            step=cfg.environment._curr_step
+                            / cfg.environment._step_log_denominator,
+                        )
 
                 cfg.logging._logger.log(
                     "internal",

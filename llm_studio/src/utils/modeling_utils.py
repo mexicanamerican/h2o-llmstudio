@@ -14,7 +14,6 @@ import transformers
 from deepspeed.runtime.dataloader import DeepSpeedDataLoader
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 from peft import LoraConfig, PeftModel, get_peft_model
-from torch.cuda.amp import autocast
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 from transformers import (
@@ -421,53 +420,64 @@ def get_optimizer(
     """
     no_decay = ["bias", "LayerNorm.weight"]
     differential_layers = cfg.training.differential_learning_rate_layers
+    param_groups = [
+        {
+            "params": [
+                param
+                for name, param in model.named_parameters()
+                if (not any(layer in name for layer in differential_layers))
+                and (not any(nd in name for nd in no_decay))
+                and param.requires_grad
+            ],
+            "lr": cfg.training.learning_rate,
+            "weight_decay": cfg.training.weight_decay,
+            "differential": False,
+        },
+        {
+            "params": [
+                param
+                for name, param in model.named_parameters()
+                if (not any(layer in name for layer in differential_layers))
+                and (any(nd in name for nd in no_decay))
+                and param.requires_grad
+            ],
+            "lr": cfg.training.learning_rate,
+            "weight_decay": 0,
+            "differential": False,
+        },
+        {
+            "params": [
+                param
+                for name, param in model.named_parameters()
+                if (any(layer in name for layer in differential_layers))
+                and (not any(nd in name for nd in no_decay))
+                and param.requires_grad
+            ],
+            "lr": cfg.training.differential_learning_rate,
+            "weight_decay": cfg.training.weight_decay,
+            "differential": True,
+        },
+        {
+            "params": [
+                param
+                for name, param in model.named_parameters()
+                if (any(layer in name for layer in differential_layers))
+                and (any(nd in name for nd in no_decay))
+                and param.requires_grad
+            ],
+            "lr": cfg.training.differential_learning_rate,
+            "weight_decay": 0,
+            "differential": True,
+        },
+    ]
+
+    # Drop empty param groups so the optimizer's group count stays aligned with
+    # the LR scheduler: torch>=2.11 zips them with strict=True, and DeepSpeed
+    # cannot partition an empty group.
+    param_groups = [group for group in param_groups if group["params"]]
+
     optimizer = Optimizers.get(cfg.training.optimizer)(
-        [
-            {
-                "params": [
-                    param
-                    for name, param in model.named_parameters()
-                    if (not any(layer in name for layer in differential_layers))
-                    and (not any(nd in name for nd in no_decay))
-                    and param.requires_grad
-                ],
-                "lr": cfg.training.learning_rate,
-                "weight_decay": cfg.training.weight_decay,
-            },
-            {
-                "params": [
-                    param
-                    for name, param in model.named_parameters()
-                    if (not any(layer in name for layer in differential_layers))
-                    and (any(nd in name for nd in no_decay))
-                    and param.requires_grad
-                ],
-                "lr": cfg.training.learning_rate,
-                "weight_decay": 0,
-            },
-            {
-                "params": [
-                    param
-                    for name, param in model.named_parameters()
-                    if (any(layer in name for layer in differential_layers))
-                    and (not any(nd in name for nd in no_decay))
-                    and param.requires_grad
-                ],
-                "lr": cfg.training.differential_learning_rate,
-                "weight_decay": cfg.training.weight_decay,
-            },
-            {
-                "params": [
-                    param
-                    for name, param in model.named_parameters()
-                    if (any(layer in name for layer in differential_layers))
-                    and (any(nd in name for nd in no_decay))
-                    and param.requires_grad
-                ],
-                "lr": cfg.training.differential_learning_rate,
-                "weight_decay": 0,
-            },
-        ],
+        param_groups,
         lr=cfg.training.learning_rate,
         weight_decay=cfg.training.weight_decay,
     )
@@ -619,7 +629,8 @@ def run_inference(
             else:
                 output = model.forward(batch)
         else:
-            with autocast(
+            with torch.amp.autocast(
+                "cuda",
                 enabled=cfg.environment.mixed_precision,
                 dtype=get_torch_dtype(cfg.environment.mixed_precision_dtype),
             ):
@@ -798,7 +809,7 @@ def create_nlp_backbone(cfg: DefaultConfigProblemBase, model_class=AutoModel) ->
         )
         # need to force pretrained
         cfg.architecture.pretrained = True
-        kwargs["torch_dtype"] = torch.float16  # type: ignore
+        kwargs["dtype"] = torch.float16  # type: ignore
     elif cfg.architecture.backbone_dtype == "int4" and len(cfg.environment.gpus):
         kwargs["device_map"] = {"": cfg.environment._device}  # type: ignore
         quantization_config = BitsAndBytesConfig(
@@ -808,7 +819,7 @@ def create_nlp_backbone(cfg: DefaultConfigProblemBase, model_class=AutoModel) ->
         )
         # need to force pretrained
         cfg.architecture.pretrained = True
-        kwargs["torch_dtype"] = torch.float16  # type: ignore
+        kwargs["dtype"] = torch.float16  # type: ignore
     elif len(cfg.environment.gpus) == 0 and cfg.architecture.backbone_dtype in [
         "int4",
         "int8",
@@ -819,7 +830,7 @@ def create_nlp_backbone(cfg: DefaultConfigProblemBase, model_class=AutoModel) ->
         )
         cfg.architecture.backbone_dtype = "float32"
     else:
-        kwargs["torch_dtype"] = getattr(torch, cfg.architecture.backbone_dtype)
+        kwargs["dtype"] = getattr(torch, cfg.architecture.backbone_dtype)
 
     logger.info(f"Using {cfg.architecture.backbone_dtype} for backbone")
 
